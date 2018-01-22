@@ -13,6 +13,8 @@
 class Immocaster_Data_Mysql
 {
 
+	private $pdo = null;
+
 	/**
      * Object mit der Verbindung
 	 * zur Datenbank.
@@ -79,15 +81,17 @@ class Immocaster_Data_Mysql
 		}
 		if($this->connectDatabase($aConnection))
 		{
+			// if the table do not exist creates it otherwise proof if some fields exist
 			if(!$this->getDataTable())
 			{
-				if($this->setDataTable())
-				{
+				// creates the table.
+				$this->setDataTable();
 					return true;
 				}
-			}
 			else
 			{
+				// proof if the 'ic_username' exist. If not exist adds the field
+				// to the table
 				$this->updateDataTableFields();
 				return true;
 			}
@@ -103,12 +107,23 @@ class Immocaster_Data_Mysql
      */
 	private function connectDatabase($aConnection=array())
 	{
-		$this->_oDataConnection = mysqli_connect($aConnection[1],$aConnection[2],$aConnection[3],$aConnection[4]);
+		// ------------------------------------------------------------ OLD CODE
+
+		/*$this->_oDataConnection = mysqli_connect($aConnection[1],$aConnection[2],$aConnection[3],$aConnection[4]);
 		if (mysqli_connect_errno()) {
 			return FALSE;
 		}
 		$this->_oDatabaseDb=$aConnection[4];
-		return TRUE;
+		return TRUE;*/
+
+		// ------------------------------------------------------------ NEW CODE
+
+		$this->pdo = new PDO("mysql:dbname=$aConnection[4];host=$aConnection[1]", $aConnection[2], $aConnection[3]);
+		if($this->pdo)
+		{
+			return true;
+		}
+		return false;
 	}
 
 	/**
@@ -119,13 +134,28 @@ class Immocaster_Data_Mysql
      */
 	private function getDataTable()
 	{
-		if($aLists = mysqli_query($this->_oDataConnection,'SHOW TABLES'))
+		// ------------------------------------------------------------ OLD CODE
+
+		/*if($aLists = mysqli_list_tables($this->_oDatabaseDb))
 		{
 		while ($row = mysqli_fetch_row($aLists)) {
 				if($row[0]==$this->_sTableName)
 				{
 					return true;
 				}
+			}
+		}
+		return false;*/
+
+		// ------------------------------------------------------------ NEW CODE
+
+		$sql = 'SHOW TABLES';
+		$query = $this->pdo->query($sql);
+		$tables = $query->fetchAll(PDO::FETCH_COLUMN);
+		foreach ($tables as $table) {
+			if($table === $this->_sTableName)
+			{
+				return true;
 			}
 		}
 		return false;
@@ -139,7 +169,9 @@ class Immocaster_Data_Mysql
      */
 	private function setDataTable()
 	{
-		if(!$this->getDataTable())
+		// ------------------------------------------------------------ OLD CODE
+
+		/*if(!$this->getDataTable())
 		{
 			$sql = "CREATE TABLE  `".$this->_oDatabaseDb."`.`".$this->_sTableName."` (
 			`ic_id` INT( 16 ) UNSIGNED NOT NULL AUTO_INCREMENT,
@@ -150,8 +182,29 @@ class Immocaster_Data_Mysql
             `ic_username` VARCHAR(60),
             PRIMARY KEY (  `ic_id` )
             ) ENGINE = MYISAM";
-			mysqli_query($this->_oDataConnection,$sql);
+
+			mysqli_query($sql,$this->_oDataConnection);
+		}*/
+
+		// ------------------------------------------------------------ NEW CODE
+
+		// the new code returns a boolean instead of void
+		if(!$this->getDataTable())
+		{
+
+			$sql = "CREATE TABLE  `". $this->_sTableName."` (
+			`ic_id` INT( 16 ) UNSIGNED NOT NULL AUTO_INCREMENT,
+            `ic_desc` VARCHAR( 32 ) NOT NULL,
+            `ic_key` VARCHAR( 128 ) NOT NULL,
+            `ic_secret` VARCHAR( 128 ) NOT NULL,
+            `ic_expire` DATETIME NOT NULL,
+            `ic_username` VARCHAR(60),
+            PRIMARY KEY (  `ic_id` )
+            ) ENGINE = MYISAM";
+
+			$this->pdo->exec($sql);
 		}
+
 	}
 
 	/**
@@ -163,7 +216,9 @@ class Immocaster_Data_Mysql
      */
 	private function updateDataTableFields()
 	{
-		$aFields = array(
+		//------------------------------------------------------------- OLD CODE
+
+		/*$aFields = array(
 			'ic_username' => 0
 		);
 		$sql = "SHOW COLUMNS FROM `".$this->_oDatabaseDb."`.`".$this->_sTableName."`";
@@ -180,7 +235,29 @@ class Immocaster_Data_Mysql
 				$sql_username = "ALTER TABLE `".$this->_oDatabaseDb."`.`".$this->_sTableName."` ADD ic_username VARCHAR(60) NOT NULL;";
 				mysqli_query($this->_oDataConnection,$sql_username);
 			}
+		}*/
+
+		//------------------------------------------------------------- NEW CODE
+
+		$sql = "SHOW COLUMNS FROM `".$this->_sTableName."`";
+		$query = $this->pdo->query($sql);
+		$fields = $query->fetchAll(PDO::FETCH_ASSOC);
+
+		$fieldExist = false;
+
+		foreach ($fields as $key => $value) {
+			if($value["Field"] === 'ic_username')
+			{
+				$fieldExist = true;
 		}
+	}
+
+		if (!$fieldExist)
+		{
+			$sql = "ALTER TABLE `".$this->_sTableName."` ADD ic_username VARCHAR(60) NOT NULL;";
+			$this->pdo->exec($sql);
+		}
+
 	}
 
 	/**
@@ -195,13 +272,15 @@ class Immocaster_Data_Mysql
 		$this->cleanRequestToken();
 		if(strlen($sToken)>8)
 		{
-			$dExpire = date('Y-m-d H:i:s');
-			$sql = "INSERT INTO `".$this->_oDatabaseDb."`.`".$this->_sTableName."` (
+			$sql = "INSERT INTO `".$this->_sTableName."` (
 			`ic_desc`,`ic_key`,`ic_secret`,`ic_expire`
 			) VALUES (
 			'REQUEST','".$sToken."','".$sSecret."','".date("Y-m-d H:i:s", strtotime ("+".$this->_iRequestExpire." minutes"))."'
 			);";
-			if(mysqli_query($this->_oDataConnection,$sql))
+
+			$query = $this->pdo->exec($sql); // returns the number of rows that were modified or deleted (1)
+
+			if($query > 0)
 			{
 				return true;
 			}
@@ -219,7 +298,7 @@ class Immocaster_Data_Mysql
 	{
 		if(strlen($sToken)<8){return false;}
 		$sql = "SELECT * FROM `".$this->_oDatabaseDb."`.`".$this->_sTableName."` WHERE ic_desc='REQUEST' AND ic_key='".$sToken."'";
-		$result = mysqli_query($this->_oDataConnection,$sql);
+		$result = mysqli_query($sql,$this->_oDataConnection);
 		$obj = mysqli_fetch_object($result);
 		return $obj;
 	}
@@ -231,10 +310,19 @@ class Immocaster_Data_Mysql
      */
     public function getRequestTokenWithoutSession()
     {
-        $sql = "SELECT * FROM `".$this->_oDatabaseDb."`.`".$this->_sTableName."` WHERE ic_desc='REQUEST' order by ic_id desc LIMIT 1";
-        $result = mysqli_query($this->_oDataConnection,$sql);
+		// ------------------------------------------------------------ OLD CODE
+
+		/*$sql = "SELECT * FROM `".$this->_oDatabaseDb."`.`".$this->_sTableName."` WHERE ic_desc='REQUEST' order by ic_id desc LIMIT 1";
+        $result = mysqli_query($sql,$this->_oDataConnection);
         $obj = mysqli_fetch_object($result);
-        return $obj;
+        return $obj;*/
+
+		// ------------------------------------------------------------ NEW CODE
+
+		$sql = "SELECT * FROM `".$this->_sTableName."` WHERE ic_desc='REQUEST' order by ic_id desc LIMIT 1";
+		$query = $this->pdo->query($sql); // returns the number of rows that were modified or deleted (1)
+		return $query->fetch(PDO::FETCH_OBJ); // if no object return false
+
     }
 
 	/**
@@ -245,12 +333,29 @@ class Immocaster_Data_Mysql
      */
 	private function cleanRequestToken()
 	{
-		$dNow = date("Y-m-d H:i:s");
+		// ------------------------------------------------------------ OLD CODE
+
+		/*$dNow = date("Y-m-d H:i:s");
 		$sql = "SELECT * FROM `".$this->_oDatabaseDb."`.`".$this->_sTableName."` WHERE ic_desc='REQUEST'";
 		$result = mysqli_query($this->_oDataConnection,$sql);
 		while($obj = mysqli_fetch_object($result))
 		{
 			if($obj->ic_expire<$dNow)
+			{
+				$this->deleteRequestTokenById($obj->ic_id);
+			}
+		}*/
+
+		// ------------------------------------------------------------ NEW CODE
+
+		$dNow = date("Y-m-d H:i:s");
+		$sql = "SELECT * FROM `".$this->_sTableName."` WHERE ic_desc='REQUEST'";
+		$query = $this->pdo->query($sql); // returns the number of rows that were modified or deleted (1)
+		$obj = $query->fetch(PDO::FETCH_OBJ); // if no object return false
+
+		if($obj)
+		{
+			if($obj->ic_expire < $dNow)
 			{
 				$this->deleteRequestTokenById($obj->ic_id);
 			}
@@ -265,8 +370,16 @@ class Immocaster_Data_Mysql
      */
 	public function deleteRequestToken()
 	{
-		$sql = "DELETE FROM `".$this->_oDatabaseDb."`.`".$this->_sTableName."` WHERE ic_desc='REQUEST'";
-		mysqli_query($this->_oDataConnection,$sql);
+		// ------------------------------------------------------------ OLD CODE
+
+		/*$sql = "DELETE FROM `".$this->_oDatabaseDb."`.`".$this->_sTableName."` WHERE ic_desc='REQUEST'";
+		mysqli_query($sql,$this->_oDataConnection);*/
+
+		// ------------------------------------------------------------ NEW CODE
+
+		$sql = "DELETE FROM `".$this->_sTableName."` WHERE ic_desc='REQUEST'";
+		$result = $this->pdo->exec($sql);
+
 	}
 
 	/**
@@ -278,12 +391,21 @@ class Immocaster_Data_Mysql
      */
 	public function deleteRequestTokenById($iId)
 	{
-		$sql = "DELETE FROM `".$this->_oDatabaseDb."`.`".$this->_sTableName."` WHERE ic_desc='REQUEST' AND ic_id=".$iId;
-		if(mysqli_query($this->_oDataConnection,$sql))
+		// ------------------------------------------------------------ OLD CODE
+
+
+		/*$sql = "DELETE FROM `".$this->_oDatabaseDb."`.`".$this->_sTableName."` WHERE ic_desc='REQUEST' AND ic_id=".$iId;
+		if(mysqli_query($sql,$this->_oDataConnection))
 		{
 			return true;
 		}
-		return false;
+		return false;*/
+
+		// ------------------------------------------------------------ NEW CODE
+
+		$sql = "DELETE FROM `".$this->_sTableName."` WHERE ic_desc='REQUEST' AND ic_id=".$iId;
+		$this->pdo->query($sql);
+
 	}
 
 	/**
@@ -296,7 +418,10 @@ class Immocaster_Data_Mysql
      */
 	public function saveApplicationToken($sToken,$sSecret,$sUser)
 	{
-		if(strlen($sToken)>8)
+		//------------------------------------------------------------- OLD CODE
+
+
+		/*if(strlen($sToken)>8)
 		{
 			$sql = "INSERT INTO `".$this->_oDatabaseDb."`.`".$this->_sTableName."` (
 			`ic_desc`,`ic_key`,`ic_secret`,`ic_expire`,`ic_username`
@@ -306,6 +431,27 @@ class Immocaster_Data_Mysql
 			if(mysqli_query($this->_oDataConnection,$sql))
 			{
 				@$this->deleteRequestToken();
+				return true;
+			}
+		}
+		return false;*/
+
+		//------------------------------------------------------------- NEW CODE
+
+		if(strlen($sToken)>8)
+		{
+
+			$sql = "INSERT INTO `".$this->_sTableName."` (
+			`ic_desc`,`ic_key`,`ic_secret`,`ic_expire`,`ic_username`
+			) VALUES (
+			'APPLICATION','".$sToken."','".$sSecret."','0000-00-00 00:00:00.000000','".$sUser."'
+			);";
+
+			$result = $this->pdo->exec($sql);
+
+			if($result > 0)
+			{
+				$this->deleteRequestToken();
 				return true;
 			}
 		}
@@ -320,14 +466,34 @@ class Immocaster_Data_Mysql
      */
 	public function getApplicationToken($sUser)
 	{
-		$sql = "SELECT * FROM `".$this->_oDatabaseDb."`.`".$this->_sTableName."` WHERE ic_desc='APPLICATION' AND ic_username='".$sUser."'";
-		$result = mysqli_query($this->_oDataConnection,$sql);
+
+		//------------------------------------------------------------- OLD CODE
+
+		/*$sql = "SELECT * FROM `".$this->_oDatabaseDb."`.`".$this->_sTableName."` WHERE ic_desc='APPLICATION' AND ic_username='".$sUser."'";
+		$result = mysqli_query($sql,$this->_oDataConnection);
 		if($obj = mysqli_fetch_object($result))
 		{
 			return $obj;
 		}
+		return false;*/
+
+		//------------------------------------------------------------- new CODE
+
+		$sql = "SELECT * FROM `".$this->_sTableName."` WHERE ic_desc='APPLICATION' AND ic_username='".$sUser."'";
+		$query = $this->pdo->query($sql);
+		$obj = $query->fetch(PDO::FETCH_OBJ);
+
+		if(!empty((array)$obj))
+		{
+			return $obj;
+		}
+		else
+		{
 		return false;
 	}
+	}
+
+
 
 	/**
      * Alle Accesstoken für die Application
@@ -339,7 +505,7 @@ class Immocaster_Data_Mysql
 	{
 		$aUsers = array();
 		$sql = "SELECT * FROM `".$this->_oDatabaseDb."`.`".$this->_sTableName."` WHERE ic_desc='APPLICATION'";
-		$result = mysqli_query($this->_oDataConnection,$sql);
+		$result = mysqli_query($sql,$this->_oDataConnection);
 		while($obj = mysqli_fetch_object($result))
 		{
 			array_push($aUsers,$obj->ic_username);
@@ -356,7 +522,7 @@ class Immocaster_Data_Mysql
 	public function deleteApplicationToken()
 	{
 		$sql = "DELETE FROM `".$this->_oDatabaseDb."`.`".$this->_sTableName."` WHERE ic_desc='APPLICATION'";
-		mysqli_query($this->_oDataConnection,$sql);
+		mysqli_query($sql,$this->_oDataConnection);
 	}
 
 }
