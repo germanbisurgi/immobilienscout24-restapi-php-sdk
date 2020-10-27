@@ -302,27 +302,30 @@ class Immocaster_Data_Mysql
 	 * @var string Secret
      * @return boolean
      */
-	public function saveApplicationToken($sToken,$sSecret,$sUser)
-	{
-		if(strlen($sToken)>8)
-		{
+    public function saveApplicationToken($sToken,$sSecret,$sUser)
+    {
+        if(strlen($sToken)>8)
+        {
+            $sql = 'SET sql_mode=(SELECT REPLACE(@@sql_mode,"NO_ZERO_DATE", ""));';
 
-			$sql = "INSERT INTO `".$this->_sTableName."` (
+            $this->pdo->exec($sql);
+
+            $sql = "INSERT INTO `".$this->_sTableName."` (
 			`ic_desc`,`ic_key`,`ic_secret`,`ic_expire`,`ic_username`
 			) VALUES (
-			'APPLICATION','".$sToken."','".$sSecret."','0000-00-00 00:00:00.000000','".$sUser."'
+			'APPLICATION','".$sToken."','".$sSecret."','0000-00-00 00:00:00','".$sUser."'
 			);";
 
-			$result = $this->pdo->exec($sql);
+            $result = $this->pdo->exec($sql);
 
-			if($result > 0)
-			{
-				$this->deleteRequestToken();
-				return true;
-			}
-		}
-		return false;
-	}
+            if($result > 0)
+            {
+                $this->deleteRequestToken();
+                return true;
+            }
+        }
+        return false;
+    }
 
 	/**
      * Accesstoken für die Application
